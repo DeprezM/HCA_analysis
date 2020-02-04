@@ -7,7 +7,9 @@ editor_options:
 ```{r function section, echo=FALSE,include=FALSE}
 
 library(Seurat)
-library(tidyverse)
+library(tidyr)
+library(dplyr)
+library(cowplot)
 library(ggrepel)
 
 # Well known marker genes of airway epithelial, mesenchymal and immune cells
@@ -63,67 +65,70 @@ output:
 setwd("~/HCA/")
 
 # Load dataset directly from 10X output repository
-data <- Read10X("DataReal/D344_Biop_Int1/outs/filtered_gene_bc_matrices/ucagenomix-cellranger-hg19-1.3.0/")
-D344YI1 <- CreateSeuratObject(raw.data = data, min.cells = 3)
-dim(D344YI1@data)
+data <- Read10X("/data/deprez_data/HCA/Data/D344_Biop_Int1/outs/filtered_gene_bc_matrices/ucagenomix-cellranger-hg19-1.3.0/")
+D344YI1 <- CreateSeuratObject(counts = data, min.cells = 3)
+nb_cells <- dim(D344YI1)[2]
 
 
 # Identify data quality metrics
-mito.genes <- grep("^MT-", rownames(as.matrix(D344YI1@raw.data)), value = T)
-rpsrpl.genes <- grep("^RP[SL]", rownames(as.matrix(D344YI1@raw.data)), value = T)
+mito.genes <- grep("^MT-", rownames(D344YI1@assays$RNA), value = T)
+rpsrpl.genes <- grep("^RP[SL]", rownames(D344YI1@assays$RNA), value = T)
 
-dropouts <- Matrix::colSums(D344YI1@data == 0)/nrow(D344YI1@raw.data)
-percent.mito <- Matrix::colSums(D344YI1@raw.data[mito.genes, ])/Matrix::colSums(D344YI1@raw.data)
-percent.rpsrpl <- Matrix::colSums(D344YI1@raw.data[rpsrpl.genes, ])/Matrix::colSums(D344YI1@raw.data)
+dropouts <- Matrix::colSums(D344YI1@assays$RNA@counts == 0)/nrow(D344YI1@assays$RNA)
+percent.mito <- Matrix::colSums(D344YI1@assays$RNA@counts[mito.genes, ])/Matrix::colSums(D344YI1@assays$RNA)
+percent.rpsrpl <- Matrix::colSums(D344YI1@assays$RNA@counts[rpsrpl.genes, ])/Matrix::colSums(D344YI1@assays$RNA)
 
 D344YI1 <- AddMetaData(object = D344YI1, metadata = dropouts, col.name = "dropouts")
 D344YI1 <- AddMetaData(object = D344YI1, metadata = percent.mito, col.name = "percent.mito")
 D344YI1 <- AddMetaData(object = D344YI1, metadata = percent.rpsrpl, col.name = "percent.rps.rpl")
 
-VlnPlot(object = D344YI1, features.plot = c("nGene", "nUMI", "percent.mito", 
+VlnPlot(object = D344YI1, features = c("nCount_RNA", "nFeature_RNA", "percent.mito", 
                                             "percent.rps.rpl", "dropouts"), 
-        nCol = 5, cols.use = "lightsteelblue3", point.size.use = 0.5) 
+        ncol = 5, cols = "lightsteelblue3", pt.size = 0.5) 
 ```
 
 ### Filter cells according to their quality metrics
 
 Parameter        | Min threshold    | Max threshold
 ---------------- | ---------------- | ---------------
-nGene            | 400              | +Inf
-nUMI             | -Inf             | 20000
+nFeature_RNA     | 400              | +Inf
+nCount_RNA       | -Inf             | 20000
 Percent.mito     | -Inf             | 0.1
 Dropouts         | -Inf             | 0.97 
 
 
 ```{r message=FALSE, warning=FALSE, echo=FALSE, eval=T, fig.height=6, fig.width=11}
-D344YI1 <- FilterCells(object = D344YI1, subset.names = c("nGene", "nUMI", 
-                                                          "percent.mito", "dropouts"), 
-                              low.thresholds = c(400,-Inf, -Inf, -Inf), 
-                              high.thresholds = c(+Inf, 20000, 0.1, 0.97))
+D344YI1 <- subset(x = D344YI1, subset = 
+                    nFeature_RNA > 400 &
+                    nCount_RNA < 20000 &
+                    percent.mito < 0.1 &
+                    dropouts < 0.97)
 
 # Check quality metrics distribution following cell filtering
-VlnPlot(object = D344YI1, features.plot = c("nGene", "nUMI", "percent.mito", 
+VlnPlot(object = D344YI1, features = c("nCount_RNA", "nFeature_RNA", "percent.mito", 
                                             "percent.rps.rpl", "dropouts"), 
-        nCol = 5, cols.use = "lightsteelblue3", point.size.use = 0.5) 
+        ncol = 5, cols = "lightsteelblue3", pt.size = 0.5)  
+
+
 ```
 
-Before  **`r dim(D344YI1@raw.data)[2]`** cells   -->   After  **`r dim(D344YI1@data)[2]`** cells
+Before  **`r nb_cells`** cells   -->   After  **`r dim(D344YI1@assays$RNA)[2]`** cells
 
 ***
 
 ### Identification of highly variable genes (HVGs) and dimension reduction (PCA)
 
-Median UMI per cell : **`r median(D344YI1@meta.data$nUMI)`**
+Median UMI per cell : **`r median(D344YI1@meta.data$nCount_RNA)`**
 
 ```{r message=FALSE, warning=FALSE, echo=FALSE, eval=T, fig.height=5, fig.width=5}
 D344YI1 <- NormalizeData(object = D344YI1, normalization.method = "LogNormalize", 
-                         scale.factor = median(D344YI1@meta.data$nUMI))
-D344YI1 <- FindVariableGenes(object = D344YI1, mean.function = ExpMean, 
+                         scale.factor = median(D344YI1@meta.data$nCount_RNA))
+D344YI1 <- FindVariableFeatures(object = D344YI1, mean.function = ExpMean, 
                              dispersion.function = LogVMR, 
                              x.high.cutoff = 3, x.low.cutoff = 0.03, y.cutoff = 0.2)
 ```
 
-Nb highly variable genes : **`r length(D344YI1@var.genes)`**
+Nb highly variable genes : **`r length(D344YI1@assays$RNA@var.features)`**
 
 ```{r message=FALSE, warning=FALSE, echo=FALSE, eval=T, fig.height=10, fig.width=10}
 D344YI1 <- ScaleData(D344YI1, genes.use=D344YI1@var.genes, 
@@ -132,11 +137,9 @@ D344YI1 <- ScaleData(D344YI1, genes.use=D344YI1@var.genes,
 D344YI1 <- RunPCA(D344YI1, pcs.compute = 30, weight.by.var = FALSE, display.progress = FALSE, do.print=FALSE)
 
 # Compute correlation score between each gene and the components to first identify markers of heterogeneity.
-D344YI1 <- ProjectPCA(object = D344YI1, do.print = FALSE)
 
-PCHeatmap(object = D344YI1, pc.use = 1:9, cells.use = 500, do.balanced = TRUE, label.columns = FALSE)
-PCHeatmap(object = D344YI1, pc.use = 10:18, cells.use = 500, do.balanced = TRUE, 
-          label.columns = FALSE, use.full = FALSE)
+DimHeatmap(object = D344YI1, dims = 1:9, cells = 500, balanced = TRUE)
+DimHeatmap(object = D344YI1, dims = 10:18, cells = 500, balanced = TRUE)
 ```
 
 Nb PCs to use : **PCs : 1:10**
@@ -145,34 +148,36 @@ Nb PCs to use : **PCs : 1:10**
 
 ```{r message=FALSE, warning=FALSE, message = F, echo=FALSE, eval=T, fig.height=4, fig.width=9}
 D344YI1 <- RunTSNE(D344YI1, dims.use = c(1:10), do.fast = T)
-D344YI1<- FindClusters(D344YI1, resolution=0.4, reduction.type = "pca", k.param = 10, 
-                       dims.use = c(1:10), save.SNN = T, force.recalc = T)
+D344YI1 <- RunUMAP(object = D344YI1, dims = 1:10)
+D344YI1 <- FindNeighbors(object = D344YI1, do.plot=TRUE, dims = 1:10,k.param=10)
+D344YI1 <- FindClusters(object = D344YI1, resolution=0.4)
 
-p1 <- TSNEPlot(D344YI1, do.return = TRUE, do.label = TRUE, pt.size=2 )
-
-D344YI1 <- RunUMAP(D344YI1, dims.use = c(1:10))
-p2 <- DimPlot(object = D344YI1, reduction.use = 'umap', do.label = T, 
-              pt.size=2, do.return = T, no.legend = T)
+p1 <- DimPlot(object = D344YI1, reduction = 'tsne', label = T, 
+              pt.size=2, do.return = T) +NoLegend()
+p2 <- DimPlot(object = D344YI1, reduction = 'umap', label = T, 
+              pt.size=2, do.return = T) +NoLegend()
 
 plot_grid(p1,p2)
 ```
 
 ```{r message=FALSE, warning=FALSE, echo=FALSE, eval=T, fig.height=6, fig.width=6}
-FeaturePlot(D344YI1, c("nUMI", "nGene", "percent.mito", "percent.rps.rpl"), nCol = 2,
-            cols.use = c("grey70", "red4"))
+FeaturePlot(D344YI1, features = c("nCount_RNA", "nFeature_RNA", 
+                                  "percent.mito", "percent.rps.rpl"), 
+            ncol = 2,
+            cols = c("grey70", "red4"))
 ```
 
 Distribution of the quality metrics per cluster
 
 ```{r message=FALSE, warning=FALSE, echo=FALSE, eval=T, fig.height=4, fig.width=8}
-VlnPlot(object = D344YI1, features.plot = c("nUMI", "nGene"), nCol = 2,
-        x.lab.rot = 0.5, point.size.use = 0.5)
-VlnPlot(object = D344YI1, features.plot = c("percent.mito", "percent.rps.rpl"), nCol = 2,
-        x.lab.rot = 0.5, point.size.use = 0.5)
+VlnPlot(object = D344YI1, features = c("nCount_RNA", "nFeature_RNA"), ncol = 2,
+        pt.size = 0.5)
+VlnPlot(object = D344YI1, features = c("percent.mito", "percent.rps.rpl"), ncol = 2,
+         pt.size = 0.5)
 ```
 
 ```{r message=FALSE, warning=FALSE, echo=FALSE, eval=T, fig.height=4, fig.width=4}
-GenePlot(object = D344YI1, gene1 = "nUMI", gene2 = "nGene", pch.use=20)
+FeatureScatter(object = D344YI1, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
 ```
 
 #### Identification of cluster marker genes (Wilcoxon's rank test)
@@ -180,9 +185,8 @@ GenePlot(object = D344YI1, gene1 = "nUMI", gene2 = "nGene", pch.use=20)
 ```{r message=FALSE, warning=FALSE, echo=FALSE, eval=T, fig.height=12, fig.width=11}
 D344YI1.markers <- FindAllMarkers(object = D344YI1, only.pos = TRUE, min.pct = 0.5, thresh.use = 0.5)
 top5 <- D344YI1.markers %>% group_by(cluster) %>% top_n(5, avg_logFC)
-DoHeatmap(object = D344YI1, genes.use=top5$gene, slim.col.label = TRUE, 
-          remove.key = TRUE, cex.row = 8, cex.col = 8,
-          col.low = "#0033cc", col.mid = "#e6e6e6", col.high = "#990000")
+DoHeatmap(object = D344YI1, features=top5$gene) + 
+  scale_fill_gradient2(low = "#0033cc",mid = "#e6e6e6",high = "#990000")
 ```
 
 
@@ -192,43 +196,44 @@ DoHeatmap(object = D344YI1, genes.use=top5$gene, slim.col.label = TRUE,
 ###### Cell type labelling
 
 ```{r message=FALSE, warning=FALSE, echo=FALSE, eval=T, fig.height=4, fig.width=9}
-current.cluster.ids <- c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9 , 10, 11)
-new.cluster.ids<- c("Basal", "Endothelial", "Suprabasal", "Endothelial",
-                    "Smooth muscle", "Secretory",  "Smooth muscle", "Fibroblast",
-                    "Macrophage", "Glandulaire", "Multiciliated", "Immune")
-
-D344YI1@ident <- plyr::mapvalues(x = D344YI1@ident, from = current.cluster.ids, to = new.cluster.ids)
-
-table(D344YI1@ident)
+current.cluster.ids <- c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9 , 10)
+new.cluster.ids<- c("Basal", "Suprabasal", "Endothelial","Endothelial",
+                    "Smooth muscle", "Macrophage", "Smooth muscle","Secretory",
+                    "Fibroblast", "Serous", "Multiciliated")
 
 
-p1 <- TSNEPlot(object = D344YI1, do.label = F, no.legend = F, pt.size = 2, 
-         do.return = T, colors.use = colors.BBInt) 
-p2 <- DimPlot(object = D344YI1, reduction.use = 'umap', do.label = F, pt.size=2, do.return = T,
-          cols.use = colors.BBInt, no.legend = T)
+D344YI1@active.ident <- plyr::mapvalues(x = D344YI1@active.ident, from = current.cluster.ids, to = new.cluster.ids)
+
+table(D344YI1@active.ident)
+
+
+p1 <- DimPlot(object = D344YI1, reduction = 'tsne', label = T, 
+              pt.size=2, do.return = T, cols = cell_type_color) +NoLegend()
+p2 <- DimPlot(object = D344YI1, reduction = 'umap', label = T, 
+              pt.size=2, do.return = T, cols = cell_type_color) +NoLegend()
+
 plot_grid(p1,p2)
 ```
 
 ```{r message=FALSE, warning=FALSE, echo=FALSE, eval=T, fig.height=6, fig.width=9}
-markers_flt <- markers[markers %in% rownames(D344YI1@data)]
-DotPlot(D344YI1, genes.plot = markers_flt, x.lab.rot = 45)
+markers_flt <- markers[markers %in% rownames(D344YI1@assays$RNA)]
+DotPlot(D344YI1, features = markers_flt)  + theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
 
 ```{r message=FALSE, warning=FALSE, echo=FALSE, eval=T, fig.height=5, fig.width=9}
 # Focus on some genes of interest
-FeaturePlot(D344YI1, features.plot = c("GRP", "SCG5", "PCSK1N",
-                                       "CDC20Bshort", "CCNO", "HES6"),nCol = 3,
-            cols.use = c("lightgrey","red"))
+FeaturePlot(D344YI1, features = c("GRP", "SCG5", "PCSK1N",
+                                       "CDC20Bshort", "CCNO", "HES6"),ncol = 3,
+            cols = c("lightgrey","red"))
 ```
 
 Recompute top marker genes for each cell population
 ```{r message=FALSE, warning=FALSE, echo=FALSE, eval=T, fig.height=16, fig.width=14}
 D344YI1.markers <- FindAllMarkers(object = D344YI1, only.pos = TRUE, min.pct = 0.25, thresh.use = 0.25)
 top5 <- D344YI1.markers %>% group_by(cluster) %>% top_n(10, avg_logFC)
-DoHeatmap(object = D344YI1, genes.use=top5$gene, slim.col.label = TRUE, 
-          remove.key = TRUE, cex.row = 8, cex.col = 8, group.label.rot = T,
-          col.low = "#0033cc", col.mid = "#e6e6e6", col.high = "#990000")
+DoHeatmap(object = D344YI1, features=top5$gene) + 
+  scale_fill_gradient2(low = "#0033cc",mid = "#e6e6e6",high = "#990000")
 
 # Format the top table accordingly to each cell cluster
 marker_k0 <- D344YI1.markers %>% filter(cluster=="Basal") %>% arrange(desc(avg_logFC)) %>% mutate(ratio = pct.1 / pct.2) %>% select(cluster,gene,avg_logFC,p_val_adj,pct.1,pct.2,ratio)
@@ -237,20 +242,21 @@ marker_k2 <- D344YI1.markers %>% filter(cluster=="Secretory") %>% arrange(desc(a
 marker_k3 <- D344YI1.markers %>% filter(cluster=="Endothelial") %>% arrange(desc(avg_logFC)) %>% mutate(ratio = pct.1 / pct.2) %>% select(cluster,gene,avg_logFC,p_val_adj,pct.1,pct.2,ratio)
 marker_k4 <- D344YI1.markers %>% filter(cluster=="Fibroblast") %>% arrange(desc(avg_logFC)) %>% mutate(ratio = pct.1 / pct.2) %>% select(cluster,gene,avg_logFC,p_val_adj,pct.1,pct.2,ratio)
 marker_k5 <- D344YI1.markers %>% filter(cluster=="Smooth Muscle") %>% arrange(desc(avg_logFC)) %>% mutate(ratio = pct.1 / pct.2) %>% select(cluster,gene,avg_logFC,p_val_adj,pct.1,pct.2,ratio)
-marker_k6 <- D344YI1.markers %>% filter(cluster=="Immune") %>% arrange(desc(avg_logFC)) %>% mutate(ratio = pct.1 / pct.2) %>% select(cluster,gene,avg_logFC,p_val_adj,pct.1,pct.2,ratio)
+marker_k6 <- D344YI1.markers %>% filter(cluster=="Macrophage") %>% arrange(desc(avg_logFC)) %>% mutate(ratio = pct.1 / pct.2) %>% select(cluster,gene,avg_logFC,p_val_adj,pct.1,pct.2,ratio)
 marker_k7 <- D344YI1.markers %>% filter(cluster=="Serous") %>% arrange(desc(avg_logFC)) %>% mutate(ratio = pct.1 / pct.2) %>% select(cluster,gene,avg_logFC,p_val_adj,pct.1,pct.2,ratio)
 marker_k8 <- D344YI1.markers %>% filter(cluster=="Multiciliated") %>% arrange(desc(avg_logFC)) %>% mutate(ratio = pct.1 / pct.2) %>% select(cluster,gene,avg_logFC,p_val_adj,pct.1,pct.2,ratio)
-marker_k9 <- D344YI1.markers %>% filter(cluster=="Macrophage") %>% arrange(desc(avg_logFC)) %>% mutate(ratio = pct.1 / pct.2) %>% select(cluster,gene,avg_logFC,p_val_adj,pct.1,pct.2,ratio)
 
 all_marker_list <- bind_rows(marker_k0,marker_k1,marker_k2,marker_k3,
                              marker_k4,marker_k5,marker_k6,
-                             marker_k7,marker_k8,marker_k9,.id = NULL)
+                             marker_k7,marker_k8,.id = NULL)
 
 # Save the marker table and annotated Seurat object.
 #write.table(all_marker_list,
             #file = "/home/deprez/HCA/DataReal/D344_Biop_Int1/all_markers_D344YI1.xls",
             #sep = "\t",row.names = F)
 #save(D344YI1, file = "/home/deprez/HCA/DataReal/D344_Biop_Int1/D344YI1.Rda")
+
+sessionInfo()
 ```
 
 
