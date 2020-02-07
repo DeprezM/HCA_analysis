@@ -11,22 +11,36 @@ In this section of the workflow, the data was pre-processed in paralle in 3 diff
 
    - Consensus cells and genes filtering across the 35 samples, normalisation of all the cell counts to 10000 UMIs and merging of all the datasets in a single one to produce a large and preliminary processed count table. [`Pre-processing_preliminary_dataset.ipynb`] 
 
-   - Iterative preliminary analysis of the dataset, includes progressive cell filtering of small clusters composed of 'low quality'/'peculiar' cells (high mitochondrial cluster-cells, ...). (preliminary analysis script - v1 ...v3)
+   - Iterative preliminary analysis of the dataset, includes progressive cell filtering of small clusters composed of 'low quality'/'peculiar' cells (high mitochondrial cluster-cells, ...). [`Preliminary analysis_v1 ...v4`]
     
-   - Consensus cells and genes filtering across the 35 samples (without normalisation) and merging of all the datasets in a single one to produce a large and unique raw count table. [`Pre-processing_raw_dataset.ipynb`]
+   - Consensus cells and genes filtering across the 35 samples (without normalisation) and merging of all the datasets in a single one to produce a large and unique raw count table. [`PreProcessing_raw_dataset.ipynb`]
 
-   - Identification/Inference of doublet cells across all the 35 samples independantly, and further analysis of the dataset to estimate the proportion of inferred doublet cells in the resulting clusters and corresponding cell filtering. [`Pre-processing_doublets.ipynb`; `Pre-analysis_doublets.ipynb`; `Summary_dounlets_analysis.Rmd`]   
+   - Identification/Inference of doublet cells across all the 35 samples independantly, and further analysis of the dataset to estimate the proportion of inferred doublet cells in the resulting clusters and corresponding cell filtering. [`PreProcessing_doublets.ipynb`; `Pre-analysis_doublets.ipynb`; `Preliminary_analysis_doublet_metadata.Rmd`]   
     
-   - Pre-processing of the background in gene expression across all samples to produce a 'background free' raw count table. [`Pre-processing_gene-background_soupX.Rmd`]
+   - Pre-processing of the background in gene expression across all samples to produce a 'background free' raw count table. [`Pre-processing_gene background_dataset.Rmd`; `Preliminary_background_analysis`]
    
 **Input files for this step**
 All the 10x output files from the 35 samples (available for download on ...)
-RB_genes.txt (list of the filtered out ribosomal genes)
+RB_genes (list of the filtered out ribosomal genes)
    
 **Output files from this step:**
-  - raw_countTable.
-  - high_quality cells object
-  - raw_countTable_soupX
+Preliminary Analysis datasets :
+  - PreProcessed_preliminary_dataset
+  - Preliminary_analysis_v1...v4
+
+PreProcessed raw count Table:
+  - PreProcessed_raw_dataset
+  
+Doublet analysis:
+  - metadata_doublet
+  
+Background free datasets :
+  - background_features
+  - background_metadata
+  - SoupX_norm_dataset
+  - SoupX_raw_dataset
+  - SoupX_strained_dataset  (Advance SoupX correction, not used in the following analysis)
+  
 
 
 
