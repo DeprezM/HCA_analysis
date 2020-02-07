@@ -1,0 +1,265 @@
+---
+title: "PreProcessing_gene_background_dataset"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r librairies, echo = FALSE}
+library(ggplot2)
+library(SoupX)
+```
+
+
+
+```{r}
+metadata <- read.table(file = "Data/meta.tsv", 
+                       sep = "\t", header = T, stringsAsFactors = F, row.names = 1)
+
+# homogenise cell names
+metadata$cell_names <- ""
+for (i in 1:nrow(metadata)){
+  if (substr(rownames(metadata)[i], 15, 15) == "_") {
+    metadata$cell_names[i] <- paste0("Channel1___", substr(rownames(metadata)[i], 16, 33))
+  } else {
+    metadata$cell_names[i] <- paste0("Channel1___", substr(rownames(metadata)[i], 15, 32))
+  }
+}
+
+## Load results of initial analysis of empty droplets
+bg_metadata <- read.csv('/Data/background_metadata.tsv',
+                     sep = '\t', header = T, stringsAsFactors = F, row.names = 1)
+
+features <- read.csv('/Data/background_features.tsv',
+                     sep = '\t', header = T, stringsAsFactors = F, row.names = 1)
+features <- features[,grep("background_gene", colnames(features))]
+colnames(features) <- unique(bg_metadata$manip)
+
+print(colnames(features))
+samples <- colnames(features)
+
+
+# Create the necessary variables
+dataDirs = c("/data/deprez_data/HCA/Data/")
+raw_data_Dir = "/outs/"
+
+countTable <- matrix(0, ncol = nrow(metadata), nrow = nrow(features))
+strainedTable <- matrix(0, ncol = nrow(metadata), nrow = nrow(features))
+colnames(countTable) <- colnames(strainedTable) <- rownames(metadata)
+rownames(countTable) <- rownames(strainedTable) <- rownames(features)
+metadata$soupEstimate <- 0
+
+n_genes = 10
+soup_genes <- matrix("NA", nrow = n_genes, ncol = length(unique(metadata$manip)))
+colnames(soup_genes) <- unique(metadata$manip)
+```
+
+
+## Example on one sample :: D322_Biop_Nas1
+
+```{r}
+sample_name = "D322_Biop_Nas1"
+# Loading the data
+scl = load10X(paste0(dataDirs, sample_name, raw_data_Dir), keepDroplets = TRUE)
+
+# Profiling the soup
+scl$channels$Channel1 = estimateSoup(scl$channels$Channel1)
+
+# Visual sanity check with top genes in background (analysis on empty droplets)
+scl$channels$Channel1$metaData$Gene <-
+  scl$toc[rownames(features[order(features[, sample_name], decreasing = T),])[1], ]
+
+ggplot(scl$channels$Channel1$metaData, aes(x = tSNE1, y = tSNE2)) +
+  geom_point(aes(colour = Gene > 0))
+
+plotMarkerMap(scl, 
+  rownames(features[order(features[, sample_name], decreasing = T),])[1], 
+  scl$channels$Channel1$metaData[, c(3,4)])
+
+# Picking Soup specific genes
+scl = inferNonExpressedGenes(scl)
+tstGenes = rownames(scl$channels$Channel1$nonExpressedGenes)[seq(20)]
+gg = plotMarkerDistribution(scl, "Channel1", tstGenes)
+plot(gg)
+soup_genes[, sample_name] <- tstGenes
+
+gg = plotMarkerDistribution(scl, "Channel1", 
+         rownames(features[order(features[, sample_name], decreasing = T),])[1:20])
+plot(gg)
+
+
+# Compute contamination fraction per cell
+scl = calculateContaminationFraction(scl, "Channel1", list(TST = tstGenes))
+gg = plotChannelContamination(scl, "Channel1")
+plot(gg)
+
+scl = interpolateCellContamination(scl, "Channel1", useGlobal = TRUE)
+print(scl$channels$Channel1$rhos[1])
+
+# Correction expression profile
+scl = strainCells(scl)
+scl = adjustCounts(scl)
+
+
+## Update variables
+metadata$soupEstimate[metadata$manip == sample_name] <- scl$channels$Channel1$rhos[1]
+gene_names <- rownames(features)[rownames(features) %in% rownames(scl$toc)]
+cell_names <- metadata[metadata$manip == sample_name, "cell_names"]
+countTable[gene_names, rownames(metadata[metadata$manip == sample_name, ])] <-
+  as.matrix(scl$atoc[gene_names, cell_names])
+strainedTable[gene_names, rownames(metadata[metadata$manip == sample_name, ])] <-
+  as.matrix(scl$strainedExp[gene_names, cell_names])
+```
+
+# Run with all datasets 
+
+```{r}
+
+for (i in 1:ncol(soup_genes)){
+  sample_name <- colnames(soup_genes)[i]
+  print(sample_name)
+  
+  # Loading the data
+  scl = load10X(paste0(dataDirs, sample_name, raw_data_Dir), keepDroplets = TRUE)
+  
+  # Profiling the soup
+  scl$channels$Channel1 = estimateSoup(scl$channels$Channel1)
+  q
+  # Visual sanity check with top genes in background (homemade estimate)
+  scl$channels$Channel1$metaData$Gene <-
+    scl$toc[rownames(features[order(features[, sample_name], decreasing = T),])[1], ]
+  
+  ggplot(scl$channels$Channel1$metaData, aes(x = tSNE1, y = tSNE2)) +
+    geom_point(aes(colour = Gene > 0))
+  
+  plotMarkerMap(scl, 
+                rownames(features[order(features[, sample_name], decreasing = T),])[1], 
+                scl$channels$Channel1$metaData[, c(3,4)])
+  
+  # Picking Soup specific genes
+  scl = inferNonExpressedGenes(scl)
+  tstGenes = rownames(scl$channels$Channel1$nonExpressedGenes)[seq(n_genes)]
+  gg = plotMarkerDistribution(scl, "Channel1", tstGenes)
+  plot(gg)
+  soup_genes[, sample_name] <- tstGenes
+  
+  gg = plotMarkerDistribution(scl, "Channel1", 
+                              rownames(features[order(features[, sample_name], decreasing = T),])[1:20])
+  plot(gg)
+  
+  
+  # Compute contamination fraction per cell
+  scl = calculateContaminationFraction(scl, "Channel1", list(TST = tstGenes))
+  gg = plotChannelContamination(scl, "Channel1")
+  plot(gg)
+  
+  scl = interpolateCellContamination(scl, "Channel1", useGlobal = TRUE)
+  print(scl$channels$Channel1$rhos[1])
+  
+  # Correction expression profile
+  scl = strainCells(scl)
+  scl = adjustCounts(scl)
+  
+  
+  # Update variables
+  metadata$soupEstimate[metadata$manip == sample_name] <- scl$channels$Channel1$rhos[1]
+  gene_names <- rownames(features)[rownames(features) %in% rownames(scl$toc)]
+  cell_names <- metadata[metadata$manip == sample_name, "cell_names"]
+  countTable[gene_names, rownames(metadata[metadata$manip == sample_name, ])] <-
+    as.matrix(scl$atoc[gene_names, cell_names])
+  strainedTable[gene_names, rownames(metadata[metadata$manip == sample_name, ])] <-
+    as.matrix(scl$strainedExp[gene_names, cell_names])
+  
+}
+
+
+save(countTable, file = "/Data/SoupX_raw_dataset.Rda")
+
+# write.table(countTable, file = "/Data/SoupX_raw_dataset.txt", 
+#             sep = "\t", quote = F)
+# gz1 <- gzfile("/Data/SoupX_raw_dataset.txt.gz", "w")
+# write.table(countTable, file = gz1, quote = F, sep = "\t")
+# close(gz1)
+# 
+# save(strainedTable,
+#      file = "/Data/SoupX_strained_dataset.Rda")
+# write.table(strainedTable, file = "/Data/SoupX_strained_dataset.tsv", 
+#             sep = "\t", quote = F)
+# 
+
+```
+
+#### Normalize soupX countTable
+
+```{r}
+
+library(ggplot2)
+library(tidyr)
+library(igraph)
+library(BiocParallel)
+library(Rtsne)
+library(irlba)
+library(cowplot)
+library(Matrix)
+library(scater)
+library(scran)
+
+
+
+
+load('/Data/SoupX_raw_dataset.Rda')
+
+## Filter out Ribo genes and MT genes
+RB_genes = read.delim("/Data/RB_genes", header = F, stringsAsFactors = F)
+
+sbt_count <- countTable
+sbt_meta <- metadata
+
+keep_genes <- rownames(sbt_count)[!(rownames(sbt_count) %in% 
+     c(grep("^MT-", rownames(sbt_count), value = T), RB_genes[,"V1"]))]
+sbt_count <- sbt_count[keep_genes ,]
+
+
+# Create sceSET
+sce <- SingleCellExperiment(
+    assays = list(counts = as.matrix(sbt_count)), 
+    colData = sbt_meta
+)
+
+dim(sce)
+
+## Normalize
+ncores = 6
+mcparam = SnowParam(workers = ncores)
+lib.sizes = Matrix::colSums(counts(sce))
+sce = sce[calcAverage(sce)>0.01,]
+dim(sce)
+
+clusts = as.numeric(quickCluster(sce, method = "igraph", min.size = 100,
+                                 BPPARAM = mcparam))
+
+#now run the normalisation
+#number of cells in each cluster should be at least twice that of the largest 'sizes'
+min.clust = min(table(clusts))/2
+new_sizes = c(floor(min.clust/3), floor(min.clust/2), floor(min.clust))
+sce = computeSumFactors(sce, clusters = clusts, sizes = new_sizes,
+                        max.cluster.size = 3000)
+
+
+ggplot(data = data.frame(X = lib.sizes, Y = sizeFactors(sce)),
+              mapping = aes(x = X, y = Y)) +
+  geom_point() +
+  scale_x_log10(breaks = c(5000, 10000, 50000, 100000), labels = c("5,000", "10,000", "50,000", "100,000") ) +
+  scale_y_log10(breaks = c(0.2, 1, 5)) +
+  labs(x = "Number of UMIs", y = "Size Factor")
+
+
+sce <- scater::normalize(sce)
+
+countTable<- logcounts(sce)
+save(countTable, file = "/Data/SoupX_norm_dataset.Rda")
+```
+
+
+
