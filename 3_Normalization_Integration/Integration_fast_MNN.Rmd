@@ -1,0 +1,148 @@
+---
+title: "Data_integration"
+output: html_document
+---
+
+```{r librairies, echo = FALSE}
+library(ggplot2)
+library(tidyr)
+library(igraph)
+library(BiocParallel)
+library(Rtsne)
+library(irlba)
+library(cowplot)
+library(Matrix)
+library(scater)
+library(scran)
+
+# ---------------------------------------------------------------------------
+# Colors 
+position_color <- c('Nasal' = '#ffd966',
+                   'Proximal' = '#e69138',
+                   'Intermediate' = '#e06666',
+                   'Distal' = '#85200c')
+
+position_color_short <- c('Nas' = '#ffd966',
+                   'Pro' = '#e69138',
+                   'Int' = '#e06666',
+                   'Dis' = '#85200c')
+
+cell_type_color_df <- read.csv('/Data/clusterColor.tsv',
+                            sep='\t', header = T, stringsAsFactors = F)
+cell_type_color <- cell_type_color_df$color
+names(cell_type_color) <- cell_type_color_df$Cluster
+
+method_color <- c('Brushing' = '#009933',
+                  'Biopsy' = '#336699')
+
+
+# gene_df is the cellranger gene table
+getHVGs = function(sce, min.mean = 1e-3, gene_df = genes){
+  require(biomaRt)
+  trend = scran::trendVar(sce, use.spikes = FALSE, loess.args = list(span = 0.05))
+  decomp = scran::decomposeVar(sce, fit = trend)
+  decomp = decomp[decomp$mean > min.mean,]
+  
+  #exclude sex genes
+  xist = "XIST"
+   human_ensembl = useMart("ensembl")
+   human_ensembl = useDataset("hsapiens_gene_ensembl", mart = human_ensembl)
+   gene_map = getBM(attributes=c("ensembl_gene_id", "chromosome_name"), filters = "ensembl_gene_id", values = rownames(decomp), mart = human_ensembl)
+   ychr = gene_map[gene_map[,2] == "Y", 1]
+  #ychr = read.table("/nfs/research1/marioni/jonny/embryos/data/ygenes.tab", stringsAsFactors = FALSE)[,1]
+  #other = c("tomato-td") #for the chimera
+  decomp = decomp[!rownames(decomp) %in% c(xist, ychr),]
+  
+  decomp$FDR = p.adjust(decomp$p.value, method = "fdr")
+  return(rownames(decomp)[decomp$p.value < 0.05])
+}
+
+```
+
+### Batch correction
+
+
+```{r batch correction}
+
+load("/Data/scranNorm_sce.Rda")
+
+sbt_meta <- colData(sce)
+nPC = 50
+hvgs = getHVGs(sce)
+
+# Set order for data integration
+order_df = sbt_meta[!duplicated(sbt_meta$manip), c("position", "manip")]
+order_df$ncells = sapply(order_df$manip, function(x) sum(sbt_meta$manip == x))
+order_df$position = factor(order_df$position, 
+                        levels = rev(c("Intermediate", 
+                                   "Proximal", 
+                                   "Distal", 
+                                   "Nasal")))
+order_df = order_df[order(order_df$position, order_df$ncells, 
+                          decreasing = TRUE),]
+order_df$position = as.character(order_df$position)
+
+counts = logcounts(sce)[rownames(sce) %in% hvgs,]
+
+timepoints = sbt_meta$position
+samples = sbt_meta$manip
+timepoint_order = order_df$position
+sample_order = order_df$manip
+npc = 50
+BPPARAM = mcparam
+
+print("Compute PCA")
+pca = prcomp_irlba(t(counts), n = npc)$x
+rownames(pca) = colnames(counts)
+
+length(unique(samples))
+
+# create nested list
+pc_list = lapply(unique(timepoints), function(tp){
+  sub_pc = pca[timepoints == tp, , drop = FALSE]
+  sub_samp = samples[timepoints == tp]
+  list = lapply(unique(sub_samp), function(samp){
+    sub_pc[sub_samp == samp, , drop = FALSE]
+  })
+  names(list) = unique(sub_samp)
+  return(list)
+})
+names(pc_list) = unique(timepoints)
+
+# arrange to match timepoint order
+pc_list = pc_list[order(match(names(pc_list), timepoint_order))]
+pc_list = lapply(pc_list, function(x){
+  x[order(match(names(x), sample_order))]
+})
+lapply(pc_list, function(x){ print(names(x))})
+
+# perform corrections within list elements (i.e. within stages)
+correct_list = lapply(pc_list, function(x){
+  print("Perform correction within position")
+  if(length(x) > 1){
+    print(names(x))
+    return(do.call(fastMNN, c(x, "pc.input" = TRUE, BPPARAM = BPPARAM))$corrected)
+  } else {
+    return(x[[1]])
+  }
+})
+
+
+# perform correction over list
+if(length(correct_list)>1){
+  print("Perform correction over positions")
+  correct = do.call(fastMNN, c(correct_list, "pc.input" = TRUE, BPPARAM = BPPARAM))$corrected
+} else {
+  correct = correct_list[[1]]
+}
+correct = correct[match(colnames(counts), rownames(correct)),]
+
+
+# Save output files
+write.table(correct, file = "/Data/fastMNN_PCA.txt", quote = F, sep = "\t")
+write.table(sbt_meta, file = "/Data/fastMNN_meta.txt", quote = F, sep = "\t")
+
+
+
+
+```
