@@ -1,0 +1,214 @@
+---
+title: "FullDataset_v4_scranNorm_fastMNN"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r librairies, echo = FALSE}
+library(ggplot2)
+library(tidyr)
+library(igraph)
+library(BiocParallel)
+library(Rtsne)
+library(irlba)
+library(cowplot)
+library(Matrix)
+library(scater)
+library(scran)
+# ---------------------------------------------------------------------------
+# Colors 
+position_color <- c('Nasal' = '#ffd966',
+                   'Proximal' = '#e69138',
+                   'Intermediate' = '#e06666',
+                   'Distal' = '#85200c')
+
+position_color_short <- c('Nas' = '#ffd966',
+                   'Pro' = '#e69138',
+                   'Int' = '#e06666',
+                   'Dis' = '#85200c')
+
+cell_type_color_df <- read.csv('/Data/clusterColor.tsv',
+                            sep='\t', header = T, stringsAsFactors = F)
+cell_type_color <- cell_type_color_df$color
+names(cell_type_color) <- cell_type_color_df$Cluster
+
+method_color <- c('Brushing' = '#009933',
+                  'Biopsy' = '#336699')
+
+doBatchCorrect = function(counts, timepoints, samples, timepoint_order, sample_order, npc = 50, pc_override = NULL, BPPARAM = SerialParam()){
+  require(scran)
+  require(irlba)
+  require(BiocParallel)
+  
+  if(!is.null(pc_override)){
+    pca = pc_override
+  } else {
+    print("Compute PCA")
+    pca = prcomp_irlba(t(counts), n = npc)$x
+    rownames(pca) = colnames(counts)
+  }
+  
+  if(length(unique(samples)) == 1){
+    return(pca)
+  }
+  
+  #create nested list
+  pc_list = lapply(unique(timepoints), function(tp){
+    sub_pc = pca[timepoints == tp, , drop = FALSE]
+    sub_samp = samples[timepoints == tp]
+    list = lapply(unique(sub_samp), function(samp){
+      sub_pc[sub_samp == samp, , drop = FALSE]
+    })
+    names(list) = unique(sub_samp)
+    return(list)
+  })
+  
+  names(pc_list) = unique(timepoints)
+  
+  #arrange to match timepoint order
+  pc_list = pc_list[order(match(names(pc_list), timepoint_order))]
+  pc_list = lapply(pc_list, function(x){
+    x[order(match(names(x), sample_order))]
+  })
+  
+  #perform corrections within list elements (i.e. within stages)
+  correct_list = lapply(pc_list, function(x){
+    print("Perform correction within position")
+    if(length(x) > 1){
+      return(do.call(fastMNN, c(x, "pc.input" = TRUE, BPPARAM = BPPARAM))$corrected)
+    } else {
+      return(x[[1]])
+    }
+  })
+  
+  #perform correction over list
+  if(length(correct_list)>1){
+    print("Perform correction over positions")
+    correct = do.call(fastMNN, c(correct_list, "pc.input" = TRUE, BPPARAM = BPPARAM))$corrected
+  } else {
+    correct = correct_list[[1]]
+  }
+  
+  correct = correct[match(colnames(counts), rownames(correct)),]
+  
+  return(correct)
+  
+}
+
+
+
+#gene_df is the cellranger gene table
+getHVGs = function(sce, min.mean = 1e-3, gene_df = genes){
+  require(biomaRt)
+  trend = scran::trendVar(sce, use.spikes = FALSE, loess.args = list(span = 0.05))
+  decomp = scran::decomposeVar(sce, fit = trend)
+  decomp = decomp[decomp$mean > min.mean,]
+  
+  #exclude sex genes
+  xist = "XIST"
+   human_ensembl = useMart("ensembl")
+   human_ensembl = useDataset("hsapiens_gene_ensembl", mart = human_ensembl)
+   gene_map = getBM(attributes=c("ensembl_gene_id", "chromosome_name"), filters = "ensembl_gene_id", values = rownames(decomp), mart = human_ensembl)
+   ychr = gene_map[gene_map[,2] == "Y", 1]
+  #ychr = read.table("/nfs/research1/marioni/jonny/embryos/data/ygenes.tab", stringsAsFactors = FALSE)[,1]
+  #other = c("tomato-td") #for the chimera
+  decomp = decomp[!rownames(decomp) %in% c(xist, ychr),]
+  
+  decomp$FDR = p.adjust(decomp$p.value, method = "fdr")
+  return(rownames(decomp)[decomp$p.value < 0.05])
+}
+
+```
+
+
+Read raw_data files, metadata (dropout, subset)
+
+```{r data reading}
+metadata <- read.csv('/Data/metadata.tsv',
+                     sep = '\t', header = T, stringsAsFactors = F)
+
+coords <- read.csv('/Data/umap_coords.tsv',
+                     sep = '\t', header = T, stringsAsFactors = F)
+
+metadata$x <- coords$x
+metadata$y <- coords$y
+metadata$cell_type <- factor(metadata$cell_type, levels = cell_type_order)
+metadata$position <- factor(metadata$position, levels = names(position_color))
+rownames(metadata) <- gsub("-", ".", metadata$index)
+load('/Data/raw_exprMatrix.Rda')
+```
+
+Filter out doublet 
+Outlier sample
+
+```{r cell filtering}
+v <- metadata[metadata$doubletDetection == 0 &
+                          metadata$cell_type != "Secretory/MCCs" &
+                        metadata$manip != "D345_Biop_Nas1","index"]
+v<-gsub("-", ".", v)
+v<- v[v %in% colnames(countTable) ]
+sbt_count <- countTable[ , v]
+sbt_meta <- metadata[v,]
+
+# See preliminary analysis doublet metadata for additional cluster filtering,
+# and preliminary individual analysis of each sample for additional sample filtering.
+```
+
+Filter out unwanted genes
+
+```{r gene filtering}
+## Filter out Ribo genes and MT genes
+RB_genes = read.delim("/Data/RB_genes", header = F, stringsAsFactors = F)
+
+keep_genes <- rownames(sbt_count)[!(rownames(sbt_count) %in% 
+     c(grep("^MT-", rownames(sbt_count), value = T), RB_genes[,"V1"]))]
+sbt_count <- sbt_count[keep_genes ,]
+
+```
+
+
+## Create sceSET
+
+```{r sceSet}
+sce <- SingleCellExperiment(
+    assays = list(counts = as.matrix(sbt_count)), 
+    colData = sbt_meta
+)
+
+dim(sce)
+```
+
+### Normalize
+
+```{r normalize}
+
+ncores = 6
+mcparam = SnowParam(workers = ncores)
+lib.sizes = Matrix::colSums(counts(sce))
+sce = sce[calcAverage(sce)>0.01,]
+dim(sce)
+
+clusts = as.numeric(quickCluster(sce, method = "igraph", min.size = 100,
+                                 BPPARAM = mcparam))
+
+
+#now run the normalisation
+#number of cells in each cluster should be at least twice that of the largest 'sizes'
+min.clust = min(table(clusts))/2
+new_sizes = c(floor(min.clust/3), floor(min.clust/2), floor(min.clust))
+sce = computeSumFactors(sce, clusters = clusts, sizes = new_sizes,
+                        max.cluster.size = 3000)
+
+
+ggplot(data = data.frame(X = lib.sizes, Y = sizeFactors(sce)),
+              mapping = aes(x = X, y = Y)) +
+  geom_point() +
+  scale_x_log10(breaks = c(5000, 10000, 50000, 100000), labels = c("5,000", "10,000", "50,000", "100,000") ) +
+  scale_y_log10(breaks = c(0.2, 1, 5)) +
+  labs(x = "Number of UMIs", y = "Size Factor")
+
+
+sce <- scater::normalize(sce)
+save(sce, file = "/Data/scranNorm_sce.Rda")
+```
