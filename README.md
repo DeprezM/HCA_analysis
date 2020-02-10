@@ -37,11 +37,20 @@ Doublet analysis:
 Background free datasets :
   - `background_features`
   - `background_metadata`
-  - `SoupX_norm_dataset`
   - `SoupX_raw_dataset`
   - `SoupX_strained_dataset` (Advance SoupX correction, not used in the following analysis)
   
-### 3. Data Integration & Batch correction
+### 3. Data Normalization and integration (batch correction)
+
+At this stage of the workflow, the dataset is ultimately filtered of the 'low quality cells', normalized using scran method (Lun & Haghverdi) on both raw counts and soupX corrected couts and, lastly, the normalized counts data are integrated to produce a batch-free PCA matrix that will be used in the following analysis.
+
+The data integration process will progressively map one dataset onto another in the following order :
+Intermediate samples, Tracheal (Proximal) samples, Distal samples and Nasal samples. The order was defined based on the results of the preliminary analysis which established the relative homogeneity of the samples based on their sampling location. For all the samples from the 'same' initial location (level of sampling), they are aggregated from the larger to the smaller datasets (the ones with more cells first).
+
+**Output files**
+  - `Scran_norm_dataset`
+  - `fastMNN_PCA`
+  - `SoupX_norm_dataset`
 
 
 
