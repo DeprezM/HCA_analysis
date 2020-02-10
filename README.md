@@ -25,22 +25,24 @@ RB_genes (list of the filtered out ribosomal genes)
    
 **Output files from this step:**
 Preliminary Analysis datasets :
-  - PreProcessed_preliminary_dataset
-  - Preliminary_analysis_v1...v4
+  - `PreProcessed_preliminary_dataset`
+  - `Preliminary_analysis_v1...v4`
 
 PreProcessed raw count Table:
-  - PreProcessed_raw_dataset
+  - `PreProcessed_raw_dataset`
   
 Doublet analysis:
-  - metadata_doublet
+  - `metadata_doublet`
   
 Background free datasets :
-  - background_features
-  - background_metadata
-  - SoupX_norm_dataset
-  - SoupX_raw_dataset
-  - SoupX_strained_dataset  (Advance SoupX correction, not used in the following analysis)
+  - `background_features`
+  - `background_metadata`
+  - `SoupX_norm_dataset`
+  - `SoupX_raw_dataset`
+  - `SoupX_strained_dataset` (Advance SoupX correction, not used in the following analysis)
   
+### 3. Data Integration & Batch correction
+
 
 
 
