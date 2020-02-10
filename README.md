@@ -48,7 +48,7 @@ The data integration process will progressively map one dataset onto another in 
 Intermediate samples, Tracheal (Proximal) samples, Distal samples and Nasal samples. The order was defined based on the results of the preliminary analysis which established the relative homogeneity of the samples based on their sampling location. For all the samples from the 'same' initial location (level of sampling), they are aggregated from the larger to the smaller datasets (the ones with more cells first).
 
 **Output files**
-  - `Scran_norm_dataset`
+  - `scranNorm_dataset`
   - `fastMNN_PCA`
   - `SoupX_norm_dataset`
 
