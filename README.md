@@ -4,7 +4,7 @@ The code is structured in 6 steps, each with specific inputs and outputs (availa
 ### 1. Primary data analysis
 Example code of the individual exploratory analysis performed on each of the 35 samples composing the atlas, with use of the Seurat v3 R package. From this initial analysis, repeated on the 35 samples, we obtained a rough estimate of the cell type composition of the atlas (to be refined later in the analysis of the complete dataset), and a list of robust marker genes found expressed in each cell types identified across all 35 samples.
 
-**Output from this step :** `Robust_marker_genes.tsv`
+**Output from this step :** `Robust_marker_genes.tsv`  
 **Example** `D344_Biop_Int1`
 
 ### 2. Pre-processing of the data
@@ -87,10 +87,10 @@ All the scripts used for the Figures found in the paper Deprez et al. Scripts ar
   - `Annotated_dataset_metadata.tsv`
   
 **Count tables: raw or normalized**
-  -`raw_exprMatrix.Rda`
-  -`SoupX_raw_dataset.Rda`
-  -`scranNorm_dataset.Rda`
-  -`SoupX_norm_dataset.Rda`
+  -`raw_exprMatrix.Rda`  
+  -`SoupX_raw_dataset.Rda`  
+  -`scranNorm_dataset.Rda`  
+  -`SoupX_norm_dataset.Rda`  
   
   
 
